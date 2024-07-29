@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flexico Beat Maker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://www.webrtc-experiment.com/RecordRTC.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .window {
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            padding: 20px;
+            width: 900px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .sample-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .step {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #444;
+            margin-right: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+        .step.active {
+            box-shadow: 0 0 10px #4CAF50;
+        }
+        .step.current {
+            border-color: #fff;
+            box-shadow: 0 0 10px #fff;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .file-label {
+            background-color: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        button, select {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        input[type="number"], input[type="range"] {
+            width: 60px;
+        }
+        .note-select {
+            margin-right: 10px;
+        }
+        .matrix .step {
+            background-color: #000;
+            border-color: #0f0;
+        }
+        .matrix .step.active {
+            background-color: #0f0;
+            box-shadow: 0 0 10px #0f0;
+        }
+        .matrix .step.current {
+            border-color: #fff;
+            box-shadow: 0 0 10px #fff;
+        }
+        .akai-mpc .step {
+            background-color: #d32f2f;
+            border-color: #ffcdd2;
+        }
+        .akai-mpc .step.active {
+            background-color: #ff5722;
+            box-shadow: 0 0 10px #ff5722;
+        }
+        .akai-mpc .step.current {
+            border-color: #fff;
+            box-shadow: 0 0 10px #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <h1>Flexico Beat Maker</h1>
+        <div id="sequencer"></div>
+        <div class="controls">
+            <div>
+                <label for="bpm">BPM:</label>
+                <input type="number" id="bpm" min="60" max="200" value="120">
+            </div>
+            <div>
+                <label for="volume">Volume:</label>
+                <input type="range" id="volume" min="0" max="1" step="0.1" value="0.5">
+            </div>
+            <div>
+                <button id="play">Play</button>
+                <button id="stop">Stop</button>
+                <button id="record">Record</button>
+                <button id="export" disabled>Export MP3</button>
+            </div>
+            <div>
+                <label for="style">Style:</label>
+                <select id="style">
+                    <option value="default">Default</option>
+                    <option value="matrix">Matrix</option>
+                    <option value="akai-mpc">Akai MPC</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const sequencer = document.getElementById('sequencer');
+        const bpmInput = document.getElementById('bpm');
+        const volumeInput = document.getElementById('volume');
+        const playButton = document.getElementById('play');
+        const stopButton = document.getElementById('stop');
+        const recordButton = document.getElementById('record');
+        const exportButton = document.getElementById('export');
+        const styleSelect = document.getElementById('style');
+
+        let isPlaying = false;
+        let isRecording = false;
+        let currentStep = 0;
+        let recorder;
+        let audioChunks = [];
+
+        const notes = ['C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4', 'C5'];
+        const samples = new Array(6).fill(null);
+        const players = new Array(6).fill(null);
+
+        // Initialize Tone.js
+        Tone.Transport.bpm.value = 120;
+        Tone.Transport.loop = true;
+        Tone.Transport.loopEnd = '1m';
+
+        // Create sequencer grid
+        for (let i = 0; i < 6; i++) {
+            const row = document.createElement('div');
+            row.className = 'sample-row';
+            
+            const fileLabel = document.createElement('label');
+            fileLabel.className = 'file-label';
+            fileLabel.textContent = `Sample ${i + 1}`;
+            
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'audio/*';
+            fileInput.id = `sample-${i}`;
+            fileInput.addEventListener('change', (e) => loadSample(e, i));
+            
+            fileLabel.appendChild(fileInput);
+            row.appendChild(fileLabel);
+
+            const noteSelect = document.createElement('select');
+            noteSelect.className = 'note-select';
+            noteSelect.id = `note-${i}`;
+            notes.forEach(note => {
+                const option = document.createElement('option');
+                option.value = note;
+                option.textContent = note;
+                noteSelect.appendChild(option);
+            });
+            noteSelect.addEventListener('change', (e) => changeNote(e, i));
+            row.appendChild(noteSelect);
+
+            for (let j = 0; j < 16; j++) {
+                const step = document.createElement('div');
+                step.className = 'step';
+                step.dataset.row = i;
+                step.dataset.col = j;
+                step.addEventListener('click', toggleStep);
+                row.appendChild(step);
+            }
+            sequencer.appendChild(row);
+        }
+
+        function loadSample(event, index) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                Tone.context.decodeAudioData(arrayBuffer).then((audioBuffer) => {
+                    samples[index] = audioBuffer;
+                    players[index] = new Tone.Player(audioBuffer).toDestination();
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function changeNote(event, index) {
+            const note = event.target.value;
+            if (players[index]) {
+                players[index].playbackRate = Tone.Frequency(note).toFrequency() / Tone.Frequency('C4').toFrequency();
+            }
+        }
+
+        function toggleStep(event) {
+            event.target.classList.toggle('active');
+        }
+
+        function playStep(time) {
+            const steps = document.querySelectorAll('.step');
+            steps.forEach(step => step.classList.remove('current'));
+            
+            const currentSteps = document.querySelectorAll(`.step[data-col="${currentStep}"]`);
+            currentSteps.forEach((step, index) => {
+                step.classList.add('current');
+                if (step.classList.contains('active') && players[index]) {
+                    players[index].start(time);
+                }
+            });
+            currentStep = (currentStep + 1) % 16;
+        }
+
+        function startSequencer() {
+            if (isPlaying) return;
+            isPlaying = true;
+            playButton.textContent = 'Pause';
+            Tone.Transport.scheduleRepeat((time) => {
+                playStep(time);
+            }, '16n');
+            Tone.Transport.start();
+        }
+
+        function stopSequencer() {
+            if (!isPlaying) return;
+            isPlaying = false;
+            playButton.textContent = 'Play';
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+            currentStep = 0;
+            const steps = document.querySelectorAll('.step');
+            steps.forEach(step => step.classList.remove('current'));
+        }
+
+        playButton.addEventListener('click', () => {
+            if (isPlaying) {
+                stopSequencer();
+            } else {
+                startSequencer();
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            stopSequencer();
+            currentStep = 0;
+            const steps = document.querySelectorAll('.step');
+            steps.forEach(step => step.classList.remove('current'));
+        });
+
+        bpmInput.addEventListener('change', () => {
+            Tone.Transport.bpm.value = bpmInput.value;
+        });
+
+        volumeInput.addEventListener('input', () => {
+            Tone.Destination.volume.value = Tone.gainToDb(volumeInput.value);
+        });
+
+        styleSelect.addEventListener('change', (event) => {
+            sequencer.className = event.target.value;
+        });
+
+        recordButton.addEventListener('click', () => {
+            if (!isRecording) {
+                isRecording = true;
+                recordButton.textContent = 'Stop Recording';
+                audioChunks = [];
+                recorder = new RecordRTC(Tone.Destination.context.destination.stream, {
+                    type: 'audio',
+                    mimeType: 'audio/webm',
+                    recorderType: RecordRTC.StereoAudioRecorder,
+                    numberOfAudioChannels: 2,
+                    desiredSampRate: 44100,
+                    bufferSize: 16384
+                });
+                recorder.startRecording();
+                startSequencer();
+            } else {
+                isRecording = false;
+                recordButton.textContent = 'Record';
+                stopSequencer();
+                recorder.stopRecording(() => {
+                    let blob = recorder.getBlob();
+                    audioChunks.push(blob);
+                    exportButton.disabled = false;
+                });
+            }
+        });
+
+        exportButton.addEventListener('click', () => {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'flexico-beat.webm';
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            exportButton.disabled = true;
+        });
+    </script>
+</body>
+</html>
